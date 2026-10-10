@@ -1,0 +1,984 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#050d0a">
+<title>Ghost Lab Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Creepster&family=Nunito:wght@400;700;900&display=swap">
+<style>
+/* Layout: one-screen app. Setup is a centered card stack; hunt mode is a full-bleed camera with a HUD on top and bottom. */
+:root {
+  --night: #050d0a;      /* lab after midnight */
+  --panel: #0f1f19;
+  --line: #24453a;
+  --ink: #e6fff3;
+  --mute: #8fb8a6;
+  --ecto: #6dffb0;       /* ectoplasm green, the scanner glow */
+  --blood: #ff3b4e;      /* haunting alert */
+  --display: "Creepster", "Impact", system-ui, sans-serif;
+  --body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--night); color: var(--ink); font-family: var(--body); font-size: 17px; overflow: hidden; touch-action: manipulation; }
+button, label.btn {
+  font: 900 18px/1 var(--body); border: 0; border-radius: 999px; cursor: pointer;
+  padding: 18px 26px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  background: var(--ecto); color: var(--night); width: 100%;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--ecto) 40%, transparent);
+}
+button.ghostly, label.btn.ghostly { background: transparent; color: var(--ecto); border: 2px solid var(--line); box-shadow: none; }
+button:disabled { opacity: .45; }
+button:focus-visible, label.btn:focus-within, input:focus-visible { outline: 3px solid var(--blood); outline-offset: 3px; }
+
+/* ---------- setup ---------- */
+#setup { position: fixed; inset: 0; overflow-y: auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 28px) 18px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  background: radial-gradient(120% 55% at 50% 0%, color-mix(in srgb, var(--ecto) 14%, transparent), transparent 70%), var(--night); }
+.wrap { max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1 { font: 400 50px/0.95 var(--display); margin: 0; color: var(--ecto); letter-spacing: .02em;
+     text-shadow: 0 0 22px color-mix(in srgb, var(--ecto) 60%, transparent); }
+.set-tag { font: 700 13px/1 var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--mute); margin-bottom: 8px; }
+p { margin: 0; line-height: 1.5; color: var(--mute); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.card h2 { font: 400 26px/1.05 var(--display); margin: 0; color: var(--ink); letter-spacing: .03em; }
+.steps { margin: 0; padding-left: 22px; color: var(--mute); line-height: 1.5; display: grid; gap: 6px; }
+.steps b, p b { color: var(--ink); }
+#preview { width: 100%; border-radius: 14px; border: 2px solid var(--line); display: block; }
+.progress { height: 12px; border-radius: 99px; background: var(--night); overflow: hidden; border: 1px solid var(--line); }
+.progress i { display: block; height: 100%; width: 0; background: var(--ecto); transition: width .2s; }
+.err { color: var(--blood); font-weight: 700; }
+input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; background: var(--night); padding: 5px; border-radius: 16px; border: 1px solid var(--line); }
+.seg button { padding: 12px 6px; font-size: 15px; border-radius: 12px; background: transparent; color: var(--mute); box-shadow: none; flex-direction: column; gap: 4px; }
+.seg button span { font-size: 22px; }
+.seg button[aria-pressed=true] { background: var(--ecto); color: var(--night); }
+.crew { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 6px 6px 6px 8px; font-weight: 800; }
+.chip .sw { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); }
+.chip button { width: 28px; height: 28px; padding: 0; font-size: 14px; background: var(--line); color: var(--ink); box-shadow: none; }
+
+/* ---------- hunt ---------- */
+#hunt { position: fixed; inset: 0; background: #000; }
+#ar { position: absolute; inset: 0; overflow: hidden; }
+#fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 6; pointer-events: none; }
+#vignette { position: absolute; inset: 0; z-index: 7; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 35%, color-mix(in srgb, var(--ecto) 25%, #000) 85%, #000 110%); }
+#vignette.red { background: radial-gradient(ellipse at center, transparent 35%, color-mix(in srgb, var(--blood) 35%, #000) 85%, #000 110%); }
+#dark { position: absolute; inset: 0; z-index: 8; pointer-events: none; background: #000; opacity: 0; }
+#jump { position: absolute; z-index: 20; left: 50%; top: 50%; width: 80vmin; translate: -50% -50%; pointer-events: none; opacity: 0; }
+#jump.go { animation: lunge .55s cubic-bezier(.5,0,1,1) forwards; }
+@keyframes lunge { 0% { opacity: 0; scale: .2; } 15% { opacity: 1; } 85% { opacity: 1; scale: 2.6; } 100% { opacity: 0; scale: 3; } }
+.hud-top, .hud-bottom { position: absolute; left: 0; right: 0; z-index: 10; padding-inline: 14px; display: flex; gap: 10px; align-items: center; pointer-events: none; }
+.hud-top { top: 0; padding-top: calc(env(safe-area-inset-top, 0px) + 12px); }
+.hud-top .spacer { flex: 1; }
+.hud-bottom { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); flex-direction: column; }
+.pill { pointer-events: auto; background: color-mix(in srgb, var(--night) 78%, transparent); border: 1px solid var(--line);
+        border-radius: 999px; padding: 10px 16px; font: 900 16px/1 var(--body); color: var(--ink); backdrop-filter: blur(6px); width: auto; box-shadow: none; }
+.pill.icon { width: 46px; height: 46px; padding: 0; display: grid; place-items: center; font-size: 20px; }
+#score { font: 400 20px/1 var(--display); color: var(--ecto); font-variant-numeric: tabular-nums; }
+#hint { text-align: center; font-size: 17px; max-width: 360px; line-height: 1.35; }
+#hint.alert { color: var(--blood); border-color: var(--blood); }
+.dex { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.dex .pill { display: flex; gap: 6px; align-items: center; padding: 4px 12px 4px 4px; font-size: 15px; }
+.dex img { width: 30px; height: 30px; }
+#scanring { position: absolute; z-index: 5; left: 50%; top: 50%; width: min(70vw, 340px); aspect-ratio: 1; translate: -50% -50%;
+  border: 3px dashed color-mix(in srgb, var(--ecto) 70%, transparent); border-radius: 30px; pointer-events: none; animation: spin 9s linear infinite; }
+@keyframes spin { to { rotate: 360deg; } }
+@media (prefers-reduced-motion: reduce) { #scanring { animation: none; } }
+.mindar-ui-scanning { display: none !important; }
+
+/* figure registration overlay */
+#reg { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px); background: color-mix(in srgb, #000 35%, transparent); }
+#reg .ring { width: 150px; height: 150px; border-radius: 50%; border: 4px solid var(--ecto); box-shadow: 0 0 0 999px color-mix(in srgb, #000 55%, transparent); }
+#reg .box { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px; }
+#reg h2 { font: 400 26px/1 var(--display); margin: 0; letter-spacing: .03em; }
+#regName { font: 800 18px var(--body); padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--night); color: var(--ink); width: 100%; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick button { width: auto; padding: 8px 12px; font-size: 14px; background: var(--line); color: var(--ink); box-shadow: none; }
+.row2 { display: flex; gap: 10px; }
+.row2 > * { flex: 1; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+
+<section id="setup">
+  <div class="wrap">
+    <div>
+      <div class="set-tag">Spectral scanner · set 70418</div>
+      <h1>Ghost Lab Scanner</h1>
+    </div>
+
+    <div class="card" id="haveTarget" hidden>
+      <h2>Scanner is ready</h2>
+      <p id="readyMsg">Point the phone at the lab and the ghosts will come out.</p>
+      <button id="startBtn" type="button">👻 Start ghost hunt</button>
+      <button id="retakeBtn" class="ghostly" type="button">Teach the lab again</button>
+    </div>
+
+    <div class="card" id="teach">
+      <h2>Teach the scanner your lab</h2>
+      <ol class="steps">
+        <li><b>Take all the figures out</b> of the lab first. The scanner has to see the empty lab so it can notice when someone is standing in it later.</li>
+        <li>Photograph the <b>back wall and floor</b> of the lab straight on, filling most of the photo, in bright light.</li>
+        <li>Tap <b>Teach scanner</b> and wait 10–30 seconds.</li>
+      </ol>
+      <label class="btn" for="photo">📷 Photo of the empty lab
+        <input id="photo" type="file" accept="image/*" capture="environment">
+      </label>
+      <img id="preview" alt="Your photo of the empty lab" hidden>
+      <button id="compileBtn" type="button" hidden>Teach scanner</button>
+      <div class="progress" id="prog" hidden><i></i></div>
+      <p id="teachMsg" hidden></p>
+    </div>
+
+    <div class="card">
+      <h2>How scary?</h2>
+      <div class="seg" role="group" aria-label="Scare level">
+        <button type="button" data-level="1"><span>🙂</span>Spooky</button>
+        <button type="button" data-level="2"><span>😨</span>Scary</button>
+        <button type="button" data-level="3"><span>😱</span>Very scary</button>
+      </div>
+      <p id="levelMsg"></p>
+    </div>
+
+    <div class="card">
+      <h2>Ghost hunters</h2>
+      <p>Show each figure to the scanner so ghosts know who they are haunting. Tap <b>🧍 Add hunter</b> during the hunt.</p>
+      <div class="crew" id="crewList"></div>
+    </div>
+  </div>
+</section>
+
+<section id="hunt" hidden>
+  <div id="ar"></div>
+  <canvas id="fx"></canvas>
+  <div id="scanring"></div>
+  <div id="vignette"></div>
+  <div id="dark"></div>
+  <img id="jump" alt="">
+  <div class="hud-top">
+    <button class="pill icon" id="backBtn" type="button" aria-label="Back to setup">✕</button>
+    <button class="pill" id="addFig" type="button">🧍 Add hunter</button>
+    <div class="spacer"></div>
+    <button class="pill icon" id="eyeBtn" type="button" aria-label="Show what the scanner sees" aria-pressed="false">👁</button>
+    <div class="pill">Caught <span id="score">0</span></div>
+  </div>
+  <div class="hud-bottom">
+    <div class="pill" id="hint">Point the phone at the lab…</div>
+    <div class="dex" id="dex"></div>
+  </div>
+
+  <div id="reg" hidden>
+    <div></div>
+    <div class="ring"></div>
+    <div class="box">
+      <h2>Add a ghost hunter</h2>
+      <p>Hold one figure close so it <b>fills the circle</b>, type its name, then tap Scan.</p>
+      <input id="regName" type="text" maxlength="16" placeholder="Name, e.g. Professor" autocomplete="off">
+      <div class="quick" id="quick"></div>
+      <div class="row2">
+        <button id="regCancel" class="ghostly" type="button">Cancel</button>
+        <button id="regScan" type="button">Scan</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+import { Compiler } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js";
+
+const $ = (id) => document.getElementById(id);
+const K = { target: "ghostlab.target.v1", ref: "ghostlab.ref.v2", aspect: "ghostlab.aspect", dex: "ghostlab.dex.v2", crew: "ghostlab.crew.v2", level: "ghostlab.level", sens: "ghostlab.sens" };
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
+};
+const json = (k, d) => { try { return JSON.parse(store.get(k)) ?? d; } catch { return d; } };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const now = () => performance.now() / 1000;
+
+/* =====================================================================
+   GHOSTS — original designs, drawn on canvas as 6-frame animations
+   ===================================================================== */
+const KINDS = [
+  { id: "wraith",  name: "Wraith",  tint: [138, 255, 208], speed: 0.9, hp: 2 },
+  { id: "ghoul",   name: "Ghoul",   tint: [184, 255, 90],  speed: 0.6, hp: 3 },
+  { id: "banshee", name: "Banshee", tint: [205, 190, 255], speed: 1.4, hp: 2 },
+];
+const FRAMES = 6;
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+function drawGhost(kind, phase, angry, size = 256) {
+  const c = document.createElement("canvas"); c.width = c.height = size;
+  const g = c.getContext("2d"); g.scale(size / 256, size / 256);
+  const T = kind.tint, w = Math.sin(phase * Math.PI * 2), w2 = Math.cos(phase * Math.PI * 2);
+  // aura
+  const aura = g.createRadialGradient(128, 110, 20, 128, 120, 128);
+  aura.addColorStop(0, rgba(angry ? [255, 80, 90] : T, 0.35)); aura.addColorStop(1, rgba(T, 0));
+  g.fillStyle = aura; g.fillRect(0, 0, 256, 256);
+  // body fill: bright head fading into a see-through tail
+  const body = g.createLinearGradient(0, 30, 0, 250);
+  body.addColorStop(0, "rgba(245,255,250,0.88)"); body.addColorStop(0.3, rgba(T, 0.72)); body.addColorStop(0.7, rgba(T, 0.22)); body.addColorStop(1, rgba(T, 0));
+  g.fillStyle = body; g.strokeStyle = rgba(T, 0.9); g.lineWidth = 3;
+  g.shadowColor = rgba(T, 0.9); g.shadowBlur = 18;
+
+  g.beginPath();
+  if (kind.id === "wraith") {
+    // tall hood, ragged strands
+    g.moveTo(128, 22);
+    g.bezierCurveTo(70, 26, 62, 90, 58, 130);
+    g.bezierCurveTo(52, 170, 40 + w * 8, 200, 44 + w * 12, 246);
+    const tips = [[72, 214], [96, 248], [128, 222], [158, 250], [186, 216]];
+    tips.forEach(([x, y], i) => { const s = Math.sin(phase * 6.283 + i) * 10; g.lineTo(x + s * 0.6, y - 30); g.lineTo(x + s, y); });
+    g.lineTo(212 + w2 * 12, 246);
+    g.bezierCurveTo(216 - w * 8, 200, 204, 170, 198, 130);
+    g.bezierCurveTo(194, 90, 186, 26, 128, 22);
+  } else if (kind.id === "ghoul") {
+    // big round skull-head, reaching claws, tapering wisp
+    g.moveTo(128, 30);
+    g.bezierCurveTo(200, 30, 214, 110, 186, 150);
+    g.lineTo(226 + w * 6, 138); g.lineTo(214 + w * 6, 150); g.lineTo(230 + w * 6, 156); g.lineTo(196, 166);
+    g.bezierCurveTo(180, 200, 150 + w * 16, 220, 132 + w * 22, 252);
+    g.bezierCurveTo(118 + w * 10, 222, 82, 200, 62, 166);
+    g.lineTo(26 - w2 * 6, 156); g.lineTo(42 - w2 * 6, 150); g.lineTo(30 - w2 * 6, 138); g.lineTo(70, 150);
+    g.bezierCurveTo(42, 110, 56, 30, 128, 30);
+  } else {
+    // oval face with long streaming hair
+    g.moveTo(128, 36);
+    g.bezierCurveTo(176, 36, 186, 84, 180, 120);
+    g.bezierCurveTo(196 + w * 10, 150, 236 + w * 14, 170, 248, 214 + w2 * 10);
+    g.bezierCurveTo(206, 200, 176, 196, 160, 186);
+    g.bezierCurveTo(150 + w2 * 8, 210, 140, 232, 128 + w * 10, 254);
+    g.bezierCurveTo(116, 232, 106, 210, 96 - w2 * 8, 186);
+    g.bezierCurveTo(80, 196, 50, 200, 8, 214 - w * 10);
+    g.bezierCurveTo(20 - w2 * 14, 170, 60 - w * 10, 150, 76, 120);
+    g.bezierCurveTo(70, 84, 80, 36, 128, 36);
+  }
+  g.closePath(); g.fill(); g.stroke();
+  g.shadowBlur = 0;
+
+  // hollow face
+  const hole = (x, y, rx, ry, rot = 0) => { g.beginPath(); g.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); g.fill(); };
+  g.fillStyle = "rgba(4,14,10,0.92)";
+  if (kind.id === "wraith") {
+    hole(128, 100, 40, 48);                       // shadow inside the hood
+  } else if (kind.id === "ghoul") {
+    hole(100, 92, 20, 24, 0.3); hole(156, 92, 20, 24, -0.3);
+    // gaping jaw with jagged teeth
+    g.beginPath(); g.moveTo(88, 128); g.quadraticCurveTo(128, 196 + w * 6, 168, 128); g.closePath(); g.fill();
+    g.fillStyle = "rgba(240,255,245,0.95)";
+    g.beginPath();
+    for (let i = 0; i < 6; i++) { const x = 92 + i * 13; g.moveTo(x, 130); g.lineTo(x + 6.5, 146); g.lineTo(x + 13, 130); }
+    g.fill();
+    g.fillStyle = "rgba(4,14,10,0.92)";
+  } else {
+    hole(108, 92, 13, 20, 0.25); hole(148, 92, 13, 20, -0.25);
+    hole(128, 140, 15, 26 + w * 4);               // screaming mouth
+  }
+  // glowing pupils
+  const eye = angry ? "#ff2a3a" : "#eaffd8";
+  g.fillStyle = eye; g.shadowColor = eye; g.shadowBlur = 16;
+  if (kind.id === "wraith") { hole(112, 98, 7, 4, 0.3); hole(144, 98, 7, 4, -0.3); }
+  else if (kind.id === "ghoul") { hole(102, 94, 6, 6); hole(154, 94, 6, 6); }
+  else { hole(108, 94, 4, 6); hole(148, 94, 4, 6); }
+  g.shadowBlur = 0;
+  return c;
+}
+// frames[kindIndex][angry 0|1][frame]
+const FRAMES_CANVAS = KINDS.map((k) => [0, 1].map((a) => Array.from({ length: FRAMES }, (_, f) => drawGhost(k, f / FRAMES, !!a))));
+const ICONS = KINDS.map((_, i) => FRAMES_CANVAS[i][0][0].toDataURL());
+$("jump").src = FRAMES_CANVAS[0][1][0].toDataURL();
+
+/* =====================================================================
+   SETTINGS + COLLECTION
+   ===================================================================== */
+let level = clamp(parseInt(store.get(K.level)) || 2, 1, 3);
+const LEVEL_TEXT = {
+  1: "Friendly ghosts, gentle sounds. Good for little hunters.",
+  2: "Dark lab, heartbeat, whispers and flickering lights. Ghosts turn red-eyed when they haunt someone.",
+  3: "Everything in Scary, plus ghosts that sometimes lunge at the screen. For brave hunters only.",
+};
+function renderLevel() {
+  document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.level === level)));
+  $("levelMsg").textContent = LEVEL_TEXT[level];
+}
+document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => { level = +b.dataset.level; store.set(K.level, level); renderLevel(); });
+
+let dex = json(K.dex, {});
+function renderDex() {
+  $("dex").innerHTML = ""; let total = 0;
+  KINDS.forEach((k, i) => {
+    const n = dex[k.id] || 0; total += n;
+    const el = document.createElement("div"); el.className = "pill";
+    const img = new Image(); img.src = ICONS[i]; img.alt = "";
+    const t = document.createElement("span"); t.textContent = `${k.name} ×${n}`;
+    el.append(img, t); $("dex").append(el);
+  });
+  $("score").textContent = total;
+}
+
+/* crew = registered figures: [{name, hist:number[15], swatch:"rgb(...)"}] */
+let crew = json(K.crew, []);
+function renderCrew() {
+  const box = $("crewList"); box.innerHTML = "";
+  if (!crew.length) { const p = document.createElement("p"); p.textContent = "No hunters yet."; box.append(p); return; }
+  crew.forEach((f, i) => {
+    const el = document.createElement("span"); el.className = "chip";
+    const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = f.swatch;
+    const t = document.createElement("span"); t.textContent = f.name;
+    const del = document.createElement("button"); del.type = "button"; del.textContent = "✕"; del.setAttribute("aria-label", `Remove ${f.name}`);
+    del.onclick = () => { crew.splice(i, 1); store.set(K.crew, JSON.stringify(crew)); renderCrew(); };
+    el.append(sw, t, del); box.append(el);
+  });
+}
+
+/* =====================================================================
+   COLOR FINGERPRINTS — how the scanner tells figures apart
+   15 bins: 12 hues + white, grey, black
+   ===================================================================== */
+const BINS = 15;
+function binOf(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx / 255, s = mx ? (mx - mn) / mx : 0;
+  if (v < 0.18) return 14;
+  if (s < 0.2) return v > 0.72 ? 12 : 13;
+  let h;
+  if (mx === r) h = ((g - b) / (mx - mn)) % 6; else if (mx === g) h = (b - r) / (mx - mn) + 2; else h = (r - g) / (mx - mn) + 4;
+  h = (h * 60 + 360) % 360;
+  return Math.floor(h / 30) % 12;
+}
+function normHist(h) { const s = h.reduce((a, b) => a + b, 0) || 1; return h.map((x) => x / s); }
+function similarity(a, b) { let s = 0; for (let i = 0; i < BINS; i++) s += Math.min(a[i], b[i]); return s; }
+function matchFigure(hist) {
+  let best = null, bestS = 0;
+  for (const f of crew) { const s = similarity(hist, f.hist); if (s > bestS) { bestS = s; best = f; } }
+  return bestS > 0.42 ? best : null;
+}
+
+/* =====================================================================
+   SOUND
+   ===================================================================== */
+let actx = null, amb = null;
+function audio() {
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; } }
+  if (actx && actx.state === "suspended") actx.resume();
+  return actx;
+}
+function noiseBuffer(a) {
+  const b = a.createBuffer(1, a.sampleRate * 2, a.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+function startAmbience() {
+  const a = audio(); if (!a || amb) return;
+  const master = a.createGain(); master.gain.value = 0; master.connect(a.destination);
+  const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 180; lp.connect(master);
+  [55, 58.3, 82.4].forEach((f) => { const o = a.createOscillator(); o.type = "sawtooth"; o.frequency.value = f; const g = a.createGain(); g.gain.value = 0.25; o.connect(g).connect(lp); o.start(); });
+  const n = a.createBufferSource(); n.buffer = noiseBuffer(a); n.loop = true;
+  const bp = a.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 900; bp.Q.value = 3;
+  const wg = a.createGain(); wg.gain.value = 0;
+  n.connect(bp).connect(wg).connect(a.destination); n.start();
+  amb = { master, whisper: wg, bp, nextBeat: 0 };
+}
+function tone(freqs, dur = 0.15, type = "sine", vol = 0.18, glide = 0, vib = 0) {
+  const a = audio(); if (!a) return;
+  let t = a.currentTime;
+  freqs.forEach((f) => {
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (glide) o.frequency.exponentialRampToValueAtTime(f * glide, t + dur);
+    if (vib) { const l = a.createOscillator(), lg = a.createGain(); l.frequency.value = 6; lg.gain.value = vib; l.connect(lg).connect(o.frequency); l.start(t); l.stop(t + dur); }
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + 0.05);
+    t += dur * 0.8;
+  });
+}
+function noiseHit(dur, freq, vol) {
+  const a = audio(); if (!a) return;
+  const s = a.createBufferSource(); s.buffer = noiseBuffer(a);
+  const f = a.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 1.5;
+  const g = a.createGain(); const t = a.currentTime;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f).connect(g).connect(a.destination); s.start(t); s.stop(t + dur);
+}
+const sfx = {
+  appear: () => level === 1 ? tone([440], 0.7, "sine", 0.1, 0.7) : tone([300], 1.4, "sine", 0.14, 0.45, 18),
+  hit: () => { tone([520, 390], 0.08, "square", 0.07); noiseHit(0.15, 2500, 0.15); },
+  catch: () => tone([392, 523, 659, 784, 1046], 0.1, "triangle", 0.16),
+  found: () => tone([660, 880], 0.08, "sine", 0.08),
+  sting: () => { tone([110, 104], 0.9, "sawtooth", 0.12); noiseHit(0.8, 400, 0.2); },
+  screech: () => { tone([1400], 0.5, "sawtooth", 0.18, 0.4, 60); noiseHit(0.5, 3000, 0.4); },
+  beat: () => { tone([62], 0.12, "sine", 0.35, 0.6); setTimeout(() => tone([55], 0.12, "sine", 0.25, 0.6), 160); },
+};
+const buzz = (ms) => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+
+/* =====================================================================
+   SETUP SCREEN
+   ===================================================================== */
+let photoImg = null, freshTarget = null;
+function showSetup() {
+  $("hunt").hidden = true; $("setup").hidden = false;
+  const has = !!store.get(K.target);
+  $("haveTarget").hidden = !has; $("teach").hidden = has;
+  $("readyMsg").innerHTML = store.get(K.ref)
+    ? "Put the hunters in the lab, point the phone at it, and see who the ghosts go after."
+    : "Ghosts will appear, but they can't see the figures yet. Tap <b>Teach the lab again</b> with an empty lab to turn on haunting.";
+  renderLevel(); renderCrew();
+}
+$("retakeBtn").onclick = () => { $("haveTarget").hidden = true; $("teach").hidden = false; };
+$("photo").onchange = async (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image(); img.src = url; await img.decode();
+  const sc = Math.min(1, 1000 / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.round(img.naturalWidth * sc); c.height = Math.round(img.naturalHeight * sc);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(url);
+  photoImg = new Image(); photoImg.src = c.toDataURL("image/jpeg", 0.92); await photoImg.decode();
+  $("preview").src = photoImg.src; $("preview").hidden = false;
+  $("compileBtn").hidden = false; $("compileBtn").disabled = false; $("teachMsg").hidden = true;
+};
+const toB64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+const fromB64 = (b) => Uint8Array.from(atob(b), (ch) => ch.charCodeAt(0));
+$("compileBtn").onclick = async () => {
+  if (!photoImg) return;
+  audio();
+  $("compileBtn").disabled = true; $("prog").hidden = false;
+  const msg = $("teachMsg"); msg.hidden = false; msg.className = ""; msg.textContent = "The scanner is studying your lab…";
+  try {
+    const compiler = new Compiler();
+    await compiler.compileImageTargets([photoImg], (p) => { $("prog").firstElementChild.style.width = p.toFixed(0) + "%"; });
+    freshTarget = new Uint8Array(compiler.exportData());
+    // small copy of the empty lab, used to notice figures later
+    const rc = document.createElement("canvas"); rc.width = 240; rc.height = Math.round(240 * photoImg.naturalHeight / photoImg.naturalWidth);
+    rc.getContext("2d").drawImage(photoImg, 0, 0, rc.width, rc.height);
+    store.set(K.ref, rc.toDataURL("image/jpeg", 0.85));
+    store.set(K.aspect, String(photoImg.naturalHeight / photoImg.naturalWidth));
+    if (!store.set(K.target, toB64(freshTarget))) msg.textContent = "Learned! (This phone won't remember it after closing.)";
+    $("prog").hidden = true;
+    startHunt();
+  } catch (err) {
+    console.error(err);
+    msg.className = "err";
+    msg.textContent = "The scanner couldn't learn that photo. Try a part with more detail and contrast, photographed closer and in brighter light.";
+    $("compileBtn").disabled = false; $("prog").hidden = true;
+  }
+};
+$("startBtn").onclick = () => { audio(); startHunt(); };
+$("backBtn").onclick = () => location.reload();
+
+/* =====================================================================
+   THE HUNT
+   ===================================================================== */
+async function startHunt() {
+  const bytes = freshTarget || (store.get(K.target) ? fromB64(store.get(K.target)) : null);
+  if (!bytes) { showSetup(); return; }
+  const targetUrl = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  $("setup").hidden = true; $("hunt").hidden = false; renderDex();
+  try { await navigator.wakeLock?.request("screen"); } catch {}
+  if (level >= 2) startAmbience();
+
+  const aspect = (() => { const a = parseFloat(store.get(K.aspect)); return isFinite(a) && a > 0 ? a : 0.75; })();
+  const halfW = 0.5, halfH = 0.5 * aspect;
+
+  const mind = new MindARThree({
+    container: $("ar"), imageTargetSrc: targetUrl,
+    uiScanning: "no", uiLoading: "yes", uiError: "yes",
+    filterMinCF: 0.0001, filterBeta: 0.001, missTolerance: 8,
+  });
+  const { renderer, scene, camera } = mind;
+  const anchor = mind.addAnchor(0);
+
+  // ghost textures
+  const TEX = FRAMES_CANVAS.map((byAngry) => byAngry.map((frames) => frames.map((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })));
+
+  // portal: a swirling green ring on the lab
+  const portal = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.18, 48),
+    new THREE.MeshBasicMaterial({ color: 0x6dffb0, transparent: true, opacity: 0, side: THREE.DoubleSide, depthTest: false }));
+  anchor.group.add(portal);
+
+  /* ---------------- hint line ---------------- */
+  let hintUntil = 0, hintPrio = 0;
+  function hint(text, alert = false, prio = 1, hold = 2.5) {
+    const t = now();
+    if (t < hintUntil && prio < hintPrio) return;
+    $("hint").textContent = text; $("hint").classList.toggle("alert", alert);
+    hintUntil = t + hold; hintPrio = prio;
+  }
+
+  /* ---------------- fx canvas (zap beam, glitches, scanner view) ---------------- */
+  const fx = $("fx"), fg = fx.getContext("2d");
+  function sizeFx() { const d = Math.min(2, devicePixelRatio || 1); fx.width = innerWidth * d; fx.height = innerHeight * d; fg.setTransform(d, 0, 0, d, 0, 0); }
+  sizeFx(); addEventListener("resize", sizeFx);
+  const beams = [];
+  let showEye = false;
+  $("eyeBtn").onclick = () => { showEye = !showEye; $("eyeBtn").setAttribute("aria-pressed", String(showEye)); hint(showEye ? "Red squares are where the scanner sees someone standing." : "Scanner view off.", false, 2); };
+
+  /* =================================================================
+     FIGURE DETECTION
+     Compare what the camera sees on the lab with the empty-lab photo.
+     Squares that look different = something is standing there.
+     ================================================================= */
+  const refImg = store.get(K.ref);
+  const det = { ready: false, cols: 12, rows: 0, ref: null, ema: null, occ: null, flip: 0, calib: [0, 0], calibN: 0, sens: parseFloat(store.get(K.sens)) || 0.13 };
+  const SP = [0.2, 0.5, 0.8];          // sample points inside each square
+  if (refImg) {
+    const im = new Image(); im.src = refImg; await im.decode().catch(() => {});
+    const rc = document.createElement("canvas"); rc.width = im.naturalWidth; rc.height = im.naturalHeight;
+    const rg = rc.getContext("2d"); rg.drawImage(im, 0, 0);
+    const rd = rg.getImageData(0, 0, rc.width, rc.height).data;
+    det.rows = clamp(Math.round(det.cols * aspect), 6, 18);
+    const n = det.cols * det.rows * 9;
+    det.ref = new Float32Array(n * 3);
+    let k = 0;
+    for (let j = 0; j < det.rows; j++) for (let i = 0; i < det.cols; i++) for (const sv of SP) for (const su of SP) {
+      const u = (i + su) / det.cols, v = (j + sv) / det.rows;
+      const px = Math.min(rc.width - 1, Math.floor(u * rc.width)), py = Math.min(rc.height - 1, Math.floor(v * rc.height));
+      const o = (py * rc.width + px) * 4;
+      det.ref[k++] = rd[o]; det.ref[k++] = rd[o + 1]; det.ref[k++] = rd[o + 2];
+    }
+    det.ema = new Float32Array(det.cols * det.rows);
+    det.occ = new Uint8Array(det.cols * det.rows);
+    det.live = new Float32Array(n * 3);
+    det.ready = true;
+  }
+  // u,v in photo (0..1, v down) -> lab coordinates
+  const labXY = (u, v, flip) => [u - 0.5, flip ? (v - 0.5) * aspect : (0.5 - v) * aspect];
+
+  const vcan = document.createElement("canvas"), vg = vcan.getContext("2d", { willReadFrequently: true });
+  const tmpV = new THREE.Vector3();
+  function videoFrame() {
+    const vid = mind.video; if (!vid || !vid.videoWidth) return null;
+    const sc = Math.max(1, vid.videoWidth / 360);
+    const w = Math.round(vid.videoWidth / sc), h = Math.round(vid.videoHeight / sc);
+    if (vcan.width !== w || vcan.height !== h) { vcan.width = w; vcan.height = h; }
+    vg.drawImage(vid, 0, 0, w, h);
+    return {
+      data: vg.getImageData(0, 0, w, h).data, w, h, sc,
+      left: parseFloat(vid.style.left) || 0, top: parseFloat(vid.style.top) || 0,
+      cw: parseFloat(vid.style.width) || vid.videoWidth, ch: parseFloat(vid.style.height) || vid.videoHeight, vw: vid.videoWidth, vh: vid.videoHeight,
+    };
+  }
+  // lab point -> screen px (container) ; returns null if behind camera
+  function toScreen(x, y, z = 0) {
+    tmpV.set(x, y, z).applyMatrix4(anchor.group.matrixWorld).project(camera);
+    if (tmpV.z > 1) return null;
+    const r = $("ar");
+    return [(tmpV.x + 1) / 2 * r.clientWidth, (1 - tmpV.y) / 2 * r.clientHeight];
+  }
+  function sampleAt(fr, sx, sy) {
+    const vx = (sx - fr.left) / fr.cw * fr.vw / fr.sc, vy = (sy - fr.top) / fr.ch * fr.vh / fr.sc;
+    const px = Math.floor(vx), py = Math.floor(vy);
+    if (px < 0 || py < 0 || px >= fr.w || py >= fr.h) return null;
+    const o = (py * fr.w + px) * 4;
+    return [fr.data[o], fr.data[o + 1], fr.data[o + 2]];
+  }
+  // read the lab squares for one orientation; returns mean difference
+  function readLab(fr, flip, write) {
+    const { cols, rows, ref, live } = det;
+    let k = 0, sumL = [0, 0, 0], sumR = [0, 0, 0], miss = 0;
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) for (const sv of SP) for (const su of SP) {
+      const [x, y] = labXY((i + su) / cols, (j + sv) / rows, flip);
+      const s = toScreen(x, y); const c = s && sampleAt(fr, s[0], s[1]);
+      if (c) { for (let q = 0; q < 3; q++) { live[k + q] = c[q]; sumL[q] += c[q]; sumR[q] += ref[k + q]; } }
+      else { live[k] = -1; miss++; }
+      k += 3;
+    }
+    const gain = sumL.map((v, q) => (sumR[q] + 1) / (v + 1));   // cancel out room lighting
+    let total = 0, cnt = 0;
+    for (let c = 0; c < cols * rows; c++) {
+      let d = 0, m = 0;
+      for (let s = 0; s < 9; s++) {
+        const o = (c * 9 + s) * 3; if (live[o] < 0) continue;
+        d += (Math.abs(live[o] * gain[0] - ref[o]) + Math.abs(live[o + 1] * gain[1] - ref[o + 1]) + Math.abs(live[o + 2] * gain[2] - ref[o + 2])) / 765; m++;
+      }
+      if (m) { d /= m; total += d; cnt++; }
+      if (write) det.ema[c] = m >= 5 ? det.ema[c] * 0.55 + d * 0.45 : det.ema[c] * 0.8;
+    }
+    det.gain = gain;
+    return cnt ? total / cnt : 1;
+  }
+
+  /* actors = figures currently seen in the lab */
+  const actors = [];
+  let actorId = 0;
+  function makeLabel() {
+    const c = document.createElement("canvas"); c.width = 256; c.height = 96;
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false }));
+    s.scale.set(0.24, 0.09, 1); s.renderOrder = 5; anchor.group.add(s);
+    return { s, c, t, key: "" };
+  }
+  function drawLabel(a) {
+    const name = a.name, fear = Math.round(a.fear * 10), key = `${name}|${fear}|${a.possessed}|${a.grouped}`;
+    if (a.label.key === key) return; a.label.key = key;
+    const g = a.label.c.getContext("2d"); g.clearRect(0, 0, 256, 96);
+    g.fillStyle = a.possessed ? "rgba(90,0,10,.85)" : "rgba(5,13,10,.8)";
+    g.beginPath(); g.roundRect(4, 4, 248, 88, 22); g.fill();
+    g.strokeStyle = a.possessed ? "#ff3b4e" : "#6dffb0"; g.lineWidth = 4; g.stroke();
+    g.fillStyle = "#e6fff3"; g.font = "900 34px Nunito, system-ui, sans-serif"; g.textAlign = "center";
+    g.fillText((a.possessed ? "😱 " : a.grouped ? "🛡 " : "") + name, 128, 44);
+    // fear meter
+    g.fillStyle = "rgba(255,255,255,.15)"; g.fillRect(28, 60, 200, 14);
+    g.fillStyle = a.fear > 0.66 ? "#ff3b4e" : a.fear > 0.33 ? "#ffc845" : "#6dffb0"; g.fillRect(28, 60, 200 * a.fear, 14);
+    a.label.t.needsUpdate = true;
+  }
+
+  function detect() {
+    if (!det.ready || !anchor.group.visible) return;
+    const fr = videoFrame(); if (!fr) return;
+    anchor.group.updateMatrixWorld(true);
+    // first moments: figure out which way is up in the lab photo
+    if (det.calibN < 12) {
+      det.calib[0] += readLab(fr, 0, false); det.calib[1] += readLab(fr, 1, false); det.calibN++;
+      det.flip = det.calib[1] < det.calib[0] * 0.85 ? 1 : 0;
+      return;
+    }
+    readLab(fr, det.flip, true);
+    const { cols, rows, ema, occ, live } = det;
+    let on = 0;
+    for (let c = 0; c < cols * rows; c++) { occ[c] = ema[c] > det.sens ? 1 : 0; on += occ[c]; }
+    if (on > cols * rows * 0.45) { hint("Too blurry or too dark to see the hunters. Hold the phone steady in good light.", false, 1); return; }
+
+    // group neighbouring squares into figures
+    const seen = new Uint8Array(cols * rows), blobs = [];
+    for (let c = 0; c < cols * rows; c++) {
+      if (!occ[c] || seen[c]) continue;
+      const stack = [c], cells = []; seen[c] = 1;
+      while (stack.length) {
+        const q = stack.pop(); cells.push(q);
+        const qi = q % cols, qj = (q / cols) | 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+          const ni = qi + di, nj = qj + dj; if (ni < 0 || nj < 0 || ni >= cols || nj >= rows) continue;
+          const n = nj * cols + ni; if (occ[n] && !seen[n]) { seen[n] = 1; stack.push(n); }
+        }
+      }
+      if (cells.length < 2) continue;
+      let sx = 0, sy = 0, hist = new Array(BINS).fill(0);
+      for (const q of cells) {
+        const qi = q % cols, qj = (q / cols) | 0;
+        const [x, y] = labXY((qi + 0.5) / cols, (qj + 0.5) / rows, det.flip);
+        sx += x; sy += y;
+        for (let s = 0; s < 9; s++) {
+          const o = (q * 9 + s) * 3; if (live[o] < 0) continue;
+          hist[binOf(live[o], live[o + 1], live[o + 2])]++;
+        }
+      }
+      const ys = cells.map((q) => labXY(0, (((q / cols) | 0) + 0.5) / rows, det.flip)[1]);
+      blobs.push({ x: sx / cells.length, y: sy / cells.length, top: Math.max(...ys), hist: normHist(hist), size: cells.length });
+    }
+
+    // follow figures from frame to frame
+    const t = now(); const used = new Set();
+    for (const b of blobs) {
+      let best = null, bd = 0.2;
+      for (const a of actors) { if (used.has(a)) continue; const d = Math.hypot(a.x - b.x, a.y - b.y); if (d < bd) { bd = d; best = a; } }
+      if (!best) { best = { id: ++actorId, x: b.x, y: b.y, top: b.top, votes: {}, name: "Someone", fear: 0, possessed: false, grouped: false, label: makeLabel(), born: t }; actors.push(best); }
+      used.add(best);
+      best.x += (b.x - best.x) * 0.5; best.y += (b.y - best.y) * 0.5; best.top += (b.top - best.top) * 0.5; best.seen = t;
+      const m = matchFigure(b.hist); const key = m ? m.name : "?";
+      best.votes[key] = (best.votes[key] || 0) * 0.9 + 1;
+      const top = Object.entries(best.votes).sort((p, q) => q[1] - p[1])[0][0];
+      const newName = top === "?" ? (crew.length ? "Someone" : "Hunter") : top;
+      if (newName !== best.name && t - best.born > 0.8 && best.name !== newName) {
+        best.name = newName;
+        if (newName !== "Someone" && newName !== "Hunter") hint(`The scanner sees ${newName} in the lab.`, false, 1);
+      }
+    }
+    for (let i = actors.length - 1; i >= 0; i--) {
+      const a = actors[i];
+      if (t - a.seen > 1.5) { anchor.group.remove(a.label.s); a.label.t.dispose(); actors.splice(i, 1); for (const g of ghosts) if (g.target === a) g.target = null; }
+    }
+    for (const a of actors) a.grouped = actors.some((o) => o !== a && Math.hypot(o.x - a.x, o.y - a.y) < 0.22);
+  }
+
+  /* =================================================================
+     GHOSTS
+     ================================================================= */
+  const ghosts = [], sparks = [], trail = [];
+  let visible = false, spawnTimer = 0, lastJump = 0, lastFlicker = now(), groupHintAt = 0, emptyHintAt = 0;
+  const trailTex = (() => { const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+    const r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, "rgba(160,255,200,.9)"); r.addColorStop(1, "rgba(109,255,176,0)");
+    g.fillStyle = r; g.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+
+  function maxGhosts() {
+    if (!actors.length) return 4;                  // empty lab: ghosts take over
+    if (actors.every((a) => a.grouped)) return 2;  // everyone together: ghosts are wary
+    return 3;
+  }
+  function spawn() {
+    const ki = Math.floor(Math.random() * KINDS.length), kind = KINDS[ki];
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX[ki][0][0], transparent: true, depthTest: false, opacity: 0 }));
+    s.scale.setScalar(0.001); s.renderOrder = 3; anchor.group.add(s);
+    const g = { sprite: s, kind, ki, hp: kind.hp, age: 0, state: "rise", size: 0.26 + Math.random() * 0.08, t: Math.random() * 10,
+      goal: new THREE.Vector3(), dart: 0, target: null, boss: false, retarget: 0, off: Math.random() * 6.28 };
+    wanderGoal(g); s.position.set(0, 0, 0.02);
+    ghosts.push(g); sfx.appear();
+  }
+  function wanderGoal(g, far = false) {
+    const r = far ? 1.15 : 0.85;
+    g.goal.set((Math.random() - 0.5) * halfW * 2 * r, (Math.random() - 0.5) * halfH * 2 * r, 0.12 + Math.random() * (far ? 0.45 : 0.3));
+  }
+  function pickTarget(g) {
+    const lonely = actors.filter((a) => !a.grouped);
+    if (!lonely.length) return null;
+    // ghosts prefer whoever is alone and already scared
+    lonely.sort((a, b) => (ghosts.filter((x) => x.target === b).length - ghosts.filter((x) => x.target === a).length) || (b.fear - a.fear));
+    return Math.random() < (level === 1 ? 0.5 : 0.8) ? lonely[0] : null;
+  }
+  function burst(pos, color, n = 22) {
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: trailTex, color, transparent: true, depthTest: false }));
+      m.scale.setScalar(0.04); m.position.copy(pos);
+      const v = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() * 0.8).normalize().multiplyScalar(0.5 + Math.random() * 0.7);
+      anchor.group.add(m); sparks.push({ m, v, life: 0.8 });
+    }
+  }
+
+  anchor.onTargetFound = () => {
+    visible = true; sfx.found(); buzz(30); $("scanring").hidden = true;
+    hint(ghosts.length ? "Tap the ghosts to catch them!" : "Something is stirring in the lab…", true, 2);
+    if (!ghosts.length) spawnTimer = 0.8;
+  };
+  anchor.onTargetLost = () => { visible = false; $("scanring").hidden = false; hint("The ghosts are hiding. Point at the lab again!", false, 3); };
+
+  /* ---------------- tapping = zapping ---------------- */
+  const ray = new THREE.Raycaster(); ray.camera = camera;
+  const ndc = new THREE.Vector2();
+  renderer.domElement.style.touchAction = "none";
+  $("ar").addEventListener("pointerdown", (e) => {
+    if (!$("reg").hidden) return;
+    beams.push({ x: e.clientX, y: e.clientY, life: 0.18 });
+    if (!visible) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const live = ghosts.filter((g) => g.state !== "caught").map((g) => g.sprite);
+    live.forEach((s) => s.scale.multiplyScalar(1.5));          // forgiving for little fingers
+    const hit = ray.intersectObjects(live, false)[0];
+    live.forEach((s) => s.scale.multiplyScalar(1 / 1.5));
+    if (!hit) return;
+    const g = ghosts.find((x) => x.sprite === hit.object);
+    g.hp -= 1;
+    if (g.hp > 0) {
+      sfx.hit(); buzz(25); g.dart = 0.7; wanderGoal(g, true);
+      hint(g.boss ? `It's strong! Keep zapping! (${g.hp} more)` : `${g.kind.name} escaped! Zap it again!`, true, 2, 1.5);
+    } else {
+      g.state = "caught"; g.age = 0; sfx.catch(); buzz([40, 30, 80]);
+      burst(g.sprite.position, new THREE.Color(`rgb(${g.kind.tint.join(",")})`));
+      dex[g.kind.id] = (dex[g.kind.id] || 0) + 1; store.set(K.dex, JSON.stringify(dex)); renderDex();
+      const freed = g.target && g.target.possessed ? g.target : null;
+      if (freed) { freed.possessed = false; freed.fear = 0; hint(`You saved ${freed.name}! 🎉`, true, 3, 3); }
+      else hint(`You caught the ${g.kind.name}! 🎉`, true, 2);
+      spawnTimer = 2 + Math.random() * 2;
+    }
+  });
+
+  /* ---------------- add a hunter ---------------- */
+  ["Professor", "J.B.", "Jack", "Parker", "Spencer"].forEach((n) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = n; b.onclick = () => { $("regName").value = n; };
+    $("quick").append(b);
+  });
+  $("addFig").onclick = () => { $("reg").hidden = false; $("regName").value = ""; };
+  $("regCancel").onclick = () => { $("reg").hidden = true; };
+  $("regScan").onclick = () => {
+    const name = $("regName").value.trim() || `Hunter ${crew.length + 1}`;
+    const fr = videoFrame(); if (!fr) { hint("The camera isn't ready yet. Try again in a moment.", true, 3); return; }
+    const box = $("ar"), cx = box.clientWidth / 2, cy = box.clientHeight / 2, R = 62;
+    const hist = new Array(BINS).fill(0); let rs = 0, gs = 0, bs = 0, n = 0;
+    for (let dy = -R; dy <= R; dy += 4) for (let dx = -R; dx <= R; dx += 4) {
+      if (dx * dx + dy * dy > R * R) continue;
+      const c = sampleAt(fr, cx + dx, cy + dy); if (!c) continue;
+      const [r, g, b] = c;   // raw camera colors, same as the lab scan uses
+      hist[binOf(r, g, b)]++; rs += r; gs += g; bs += b; n++;
+    }
+    if (!n) return;
+    const f = { name, hist: normHist(hist), swatch: `rgb(${(rs / n) | 0},${(gs / n) | 0},${(bs / n) | 0})` };
+    const i = crew.findIndex((x) => x.name.toLowerCase() === name.toLowerCase());
+    if (i >= 0) crew[i] = f; else crew.push(f);
+    store.set(K.crew, JSON.stringify(crew));
+    $("reg").hidden = true; sfx.found(); buzz(40);
+    hint(`${name} joined the ghost hunters!`, false, 3);
+  };
+
+  /* ---------------- scare effects ---------------- */
+  function jumpScare() {
+    if (level < 3 || now() - lastJump < 35) return;
+    lastJump = now();
+    const j = $("jump"); j.classList.remove("go"); void j.offsetWidth; j.classList.add("go");
+    sfx.screech(); buzz([200, 50, 200]);
+  }
+  function flicker() {
+    const d = $("dark"); let i = 0;
+    const seq = [0.85, 0, 0.7, 0, 0.9, 0];
+    const step = () => { d.style.opacity = seq[i]; i++; if (i < seq.length) setTimeout(step, 60 + Math.random() * 90); };
+    step(); noiseHit(0.2, 6000, 0.05);
+  }
+
+  /* ---------------- main loop ---------------- */
+  const clock = new THREE.Clock();
+  let frameN = 0, intensity = 0;
+  renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 0.05), T = clock.elapsedTime, tn = now();
+    frameN++;
+    if (frameN % 4 === 0) detect();
+
+    portal.material.opacity = visible ? 0.35 + 0.25 * Math.sin(T * 4) : 0;
+    portal.rotation.z += dt * 1.5;
+    portal.scale.setScalar(1 + 0.1 * Math.sin(T * 2.3));
+
+    // spawning
+    if (visible) {
+      spawnTimer -= dt;
+      if (spawnTimer <= 0 && ghosts.filter((g) => g.state !== "caught").length < maxGhosts()) { spawn(); spawnTimer = (level === 1 ? 5 : 3) + Math.random() * 3; }
+      if (det.ready && det.calibN >= 12) {
+        if (!actors.length && tn - emptyHintAt > 20) { emptyHintAt = tn; hint("The lab is empty… the ghosts are taking over!", true, 1); }
+        if (actors.length >= 2 && actors.every((a) => a.grouped) && tn - groupHintAt > 20) { groupHintAt = tn; hint("The hunters stick together. Ghosts are afraid of groups!", false, 1); }
+      }
+    }
+
+    // ghosts
+    let near = 0;
+    for (let i = ghosts.length - 1; i >= 0; i--) {
+      const g = ghosts[i], s = g.sprite; g.age += dt; g.t += dt;
+      let angry = g.boss;
+      if (g.state === "rise") {
+        const p = Math.min(1, g.age / 1.6), e = 1 - Math.pow(1 - p, 3);
+        s.position.lerpVectors(new THREE.Vector3(0, 0, 0.02), g.goal, e);
+        s.scale.setScalar(g.size * e); s.material.opacity = e;
+        if (p >= 1) g.state = "float";
+      } else if (g.state === "float") {
+        g.retarget -= dt;
+        if (g.retarget <= 0) { g.retarget = 1.2; if (!g.target || g.target.grouped) { const old = g.target; g.target = pickTarget(g); if (g.target && g.target !== old && level >= 2) hint(`A ${g.kind.name} is creeping toward ${g.target.name}…`, true, 1); } }
+        const a = g.target;
+        if (a) {
+          if (a.grouped && !g.boss) { g.target = null; wanderGoal(g, true); g.dart = 0.5; }
+          else {
+            const ang = g.t * 1.4 + g.off;
+            g.goal.set(a.x + Math.cos(ang) * 0.09, a.top + 0.04 + Math.sin(ang * 1.3) * 0.04, 0.09 + Math.sin(ang) * 0.03);
+          }
+        } else if (s.position.distanceTo(g.goal) < 0.03 || Math.random() < dt * 0.15) wanderGoal(g);
+        const sp = g.kind.speed * (g.dart > 0 ? 4 : 1) * (level === 1 ? 0.7 : 1) * (a && actors.length === 1 ? 1.3 : 1);
+        g.dart -= dt;
+        s.position.lerp(g.goal, 1 - Math.exp(-dt * sp * 1.3));
+        const wob = 1 + Math.sin(g.t * 5) * 0.05, sz = g.size * (g.boss ? 1.45 : 1);
+        s.scale.set(sz * wob, sz / wob, 1);
+        s.material.rotation = Math.sin(g.t * 2) * 0.15;
+        // haunting someone?
+        if (a && Math.hypot(s.position.x - a.x, s.position.y - a.top) < 0.16) {
+          angry = angry || level >= 2; near = Math.max(near, 0.6);
+          a.fear = Math.min(1, a.fear + dt / (level === 1 ? 12 : 7));
+          if (a.fear >= 1 && !a.possessed) {
+            a.possessed = true; g.boss = true; g.hp = Math.max(g.hp, level === 1 ? 2 : 4);
+            sfx.sting(); buzz([100, 60, 100]);
+            hint(level === 1 ? `${a.name} is being tickled by a ghost! Catch it!` : `${a.name} is POSSESSED! Zap the ghost to save them!`, true, 3, 4);
+            if (level >= 2) flicker();
+            jumpScare();
+          }
+        }
+        // flickering when weakened, ectoplasm trail
+        s.material.opacity = g.hp === 1 ? 0.55 + 0.45 * Math.abs(Math.sin(g.t * 10)) : 0.92 + 0.08 * Math.sin(g.t * 7);
+        if (Math.random() < dt * 8) {
+          const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: trailTex, transparent: true, depthTest: false, opacity: 0.5 }));
+          m.position.copy(s.position); m.position.y -= sz * 0.3; m.scale.setScalar(0.05); anchor.group.add(m); trail.push({ m, life: 1 });
+        }
+        // how close to the phone is it? (bigger on screen = scarier)
+        const sp0 = toScreen(s.position.x, s.position.y, s.position.z), sp1 = toScreen(s.position.x + sz, s.position.y, s.position.z);
+        if (sp0 && sp1) near = Math.max(near, clamp(Math.abs(sp1[0] - sp0[0]) / innerWidth - 0.15, 0, 0.6));
+      } else if (g.state === "caught") {
+        const p = Math.min(1, g.age / 0.5);
+        s.scale.setScalar(g.size * (1 - p)); s.material.rotation += dt * 20; s.material.opacity = 1 - p;
+        if (p >= 1) { anchor.group.remove(s); s.material.dispose(); ghosts.splice(i, 1); continue; }
+      }
+      s.material.map = TEX[g.ki][angry ? 1 : 0][Math.floor(g.t * 9 + g.off) % FRAMES];
+    }
+
+    // figures: labels + calming down
+    for (const a of actors) {
+      const haunted = ghosts.some((g) => g.target === a && g.state === "float");
+      if (!haunted && !a.possessed) a.fear = Math.max(0, a.fear - dt / 5);
+      if (a.possessed) near = Math.max(near, 0.8);
+      a.label.s.position.set(a.x, a.top + 0.1, 0.03);
+      a.label.s.visible = visible;
+      drawLabel(a);
+    }
+
+    // particles
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const p = sparks[i]; p.life -= dt; p.m.position.addScaledVector(p.v, dt); p.v.multiplyScalar(0.92);
+      p.m.material.opacity = Math.max(0, p.life / 0.8);
+      if (p.life <= 0) { anchor.group.remove(p.m); p.m.material.dispose(); sparks.splice(i, 1); }
+    }
+    for (let i = trail.length - 1; i >= 0; i--) {
+      const p = trail[i]; p.life -= dt * 1.4; p.m.position.y += dt * 0.03; p.m.scale.multiplyScalar(1 + dt * 0.6);
+      p.m.material.opacity = Math.max(0, p.life * 0.45);
+      if (p.life <= 0) { anchor.group.remove(p.m); p.m.material.dispose(); trail.splice(i, 1); }
+    }
+
+    // atmosphere
+    const lvlK = [0, 0.35, 0.8, 1][level];
+    intensity += ((visible ? Math.max(0.15, near) : 0.1) * lvlK - intensity) * Math.min(1, dt * 2);
+    const vig = $("vignette");
+    vig.style.opacity = (0.25 + intensity * 0.9).toFixed(2);
+    vig.classList.toggle("red", level >= 2 && actors.some((a) => a.possessed));
+    if (amb && actx) {
+      amb.master.gain.setTargetAtTime(0.05 + intensity * 0.2, actx.currentTime, 0.5);
+      amb.whisper.gain.setTargetAtTime(intensity > 0.35 ? (0.02 + 0.05 * Math.max(0, Math.sin(T * 1.7))) * intensity : 0, actx.currentTime, 0.3);
+      amb.bp.frequency.setTargetAtTime(700 + 500 * Math.sin(T * 0.9), actx.currentTime, 0.3);
+      const bpm = 60 + intensity * 90;
+      if (intensity > 0.3 && T > amb.nextBeat) { sfx.beat(); amb.nextBeat = T + 60 / bpm; }
+    }
+    if (level >= 2 && visible && tn - lastFlicker > 14 + Math.random() * 30) { lastFlicker = tn; if (intensity > 0.3) flicker(); }
+
+    // fx overlay
+    fg.clearRect(0, 0, innerWidth, innerHeight);
+    for (let i = beams.length - 1; i >= 0; i--) {
+      const b = beams[i]; b.life -= dt; if (b.life <= 0) { beams.splice(i, 1); continue; }
+      fg.strokeStyle = `rgba(109,255,176,${b.life * 5})`; fg.lineWidth = 6; fg.shadowColor = "#6dffb0"; fg.shadowBlur = 20;
+      fg.beginPath(); fg.moveTo(innerWidth / 2, innerHeight + 10);
+      const segs = 7; for (let k = 1; k <= segs; k++) { const p = k / segs; fg.lineTo(innerWidth / 2 + (b.x - innerWidth / 2) * p + (k < segs ? (Math.random() - 0.5) * 30 : 0), innerHeight + 10 + (b.y - innerHeight - 10) * p); }
+      fg.stroke(); fg.shadowBlur = 0;
+    }
+    if (level >= 2 && intensity > 0.45 && Math.random() < intensity * 0.15) {
+      for (let k = 0; k < 3; k++) { fg.fillStyle = `rgba(109,255,176,${0.06 + Math.random() * 0.1})`; fg.fillRect(0, Math.random() * innerHeight, innerWidth, 2 + Math.random() * 8); }
+    }
+    if (showEye && det.ready && visible && det.calibN >= 12) {
+      anchor.group.updateMatrixWorld(true);
+      for (let j = 0; j < det.rows; j++) for (let i = 0; i < det.cols; i++) {
+        const c = j * det.cols + i;
+        const pts = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(([u, v]) => { const [x, y] = labXY(u / det.cols, v / det.rows, det.flip); return toScreen(x, y); });
+        if (pts.some((p) => !p)) continue;
+        fg.beginPath(); pts.forEach((p, k) => k ? fg.lineTo(p[0], p[1]) : fg.moveTo(p[0], p[1])); fg.closePath();
+        fg.fillStyle = det.occ[c] ? "rgba(255,59,78,.4)" : "rgba(109,255,176,.06)"; fg.fill();
+        fg.strokeStyle = "rgba(109,255,176,.25)"; fg.lineWidth = 1; fg.stroke();
+      }
+    }
+
+    renderer.render(scene, camera);
+  });
+
+  try { await mind.start(); hint("Point the phone at the lab…", false, 3); }
+  catch (err) { console.error(err); hint("The camera didn't start. Allow camera access for this page in your browser settings, then tap ✕ and try again.", true, 9, 999); }
+}
+
+renderDex(); renderLevel(); renderCrew(); showSetup();
+</script>
+</body>
+</html>
